@@ -21,45 +21,95 @@ MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydee
 
 MAX_ITERATION = int(1e5 + 1)
 NUM_OF_CLASSESS = 151
-IMAGE_SIZE = 224
+IMAGE_SIZE = 299
 
 
-def vgg_net(weights, image):
-    layers = (
-        'conv1_1', 'relu1_1', 'conv1_2', 'relu1_2', 'pool1',
+from tensorflow.contrib.slim.python.slim.nets.inception_v3 import inception_v3_base
 
-        'conv2_1', 'relu2_1', 'conv2_2', 'relu2_2', 'pool2',
+slim = tf.contrib.slim
 
-        'conv3_1', 'relu3_1', 'conv3_2', 'relu3_2', 'conv3_3',
-        'relu3_3', 'conv3_4', 'relu3_4', 'pool3',
 
-        'conv4_1', 'relu4_1', 'conv4_2', 'relu4_2', 'conv4_3',
-        'relu4_3', 'conv4_4', 'relu4_4', 'pool4',
+def inception_v3(images,
+                 trainable=True,
+                 is_training=True,
+                 weight_decay=0.00004,
+                 stddev=0.1,
+                 dropout_keep_prob=0.8,
+                 use_batch_norm=True,
+                 batch_norm_params=None,
+                 add_summaries=True,
+                 scope="InceptionV3"):
+  """Builds an Inception V3 subgraph for image embeddings.
 
-        'conv5_1', 'relu5_1', 'conv5_2', 'relu5_2', 'conv5_3',
-        'relu5_3', 'conv5_4', 'relu5_4'
-    )
+  Args:
+    images: A float32 Tensor of shape [batch, height, width, channels].
+    trainable: Whether the inception submodel should be trainable or not.
+    is_training: Boolean indicating training mode or not.
+    weight_decay: Coefficient for weight regularization.
+    stddev: The standard deviation of the trunctated normal weight initializer.
+    dropout_keep_prob: Dropout keep probability.
+    use_batch_norm: Whether to use batch normalization.
+    batch_norm_params: Parameters for batch normalization. See
+      tf.contrib.layers.batch_norm for details.
+    add_summaries: Whether to add activation summaries.
+    scope: Optional Variable scope.
 
-    net = {}
-    current = image
-    for i, name in enumerate(layers):
-        kind = name[:4]
-        if kind == 'conv':
-            kernels, bias = weights[i][0][0][0][0]
-            # matconvnet: weights are [width, height, in_channels, out_channels]
-            # tensorflow: weights are [height, width, in_channels, out_channels]
-            kernels = utils.get_variable(np.transpose(kernels, (1, 0, 2, 3)), name=name + "_w")
-            bias = utils.get_variable(bias.reshape(-1), name=name + "_b")
-            current = utils.conv2d_basic(current, kernels, bias)
-        elif kind == 'relu':
-            current = tf.nn.relu(current, name=name)
-            if FLAGS.debug:
-                utils.add_activation_summary(current)
-        elif kind == 'pool':
-            current = utils.avg_pool_2x2(current)
-        net[name] = current
+  Returns:
+    end_points: A dictionary of activations from inception_v3 layers.
+  """
+  # Only consider the inception model to be in training mode if it's trainable.
+  is_inception_model_training = trainable and is_training
 
-    return net
+  if use_batch_norm:
+    # Default parameters for batch normalization.
+    if not batch_norm_params:
+      batch_norm_params = {
+          "is_training": is_inception_model_training,
+          "trainable": trainable,
+          # Decay for the moving averages.
+          "decay": 0.9997,
+          # Epsilon to prevent 0s in variance.
+          "epsilon": 0.001,
+          # Collection containing the moving mean and moving variance.
+          "variables_collections": {
+              "beta": None,
+              "gamma": None,
+              "moving_mean": ["moving_vars"],
+              "moving_variance": ["moving_vars"],
+          }
+      }
+  else:
+    batch_norm_params = None
+
+  if trainable:
+    weights_regularizer = tf.contrib.layers.l2_regularizer(weight_decay)
+  else:
+    weights_regularizer = None
+
+  with tf.variable_scope(scope, "InceptionV3", [images]) as scope:
+    with slim.arg_scope(
+        [slim.conv2d, slim.fully_connected],
+        weights_regularizer=weights_regularizer,
+        trainable=trainable):
+      with slim.arg_scope(
+          [slim.conv2d],
+          weights_initializer=tf.truncated_normal_initializer(stddev=stddev),
+          activation_fn=tf.nn.relu,
+          normalizer_fn=slim.batch_norm,
+          normalizer_params=batch_norm_params):
+        net, end_points = inception_v3_base(images,final_endpoint='Mixed_7c', scope=scope)
+       
+       
+	
+  # Add summaries.
+  if add_summaries:
+    for v in end_points.values():
+      tf.contrib.layers.summaries.summarize_activation(v)
+
+  return net
+
+
+
 
 
 def inference(image, keep_prob):
@@ -69,7 +119,7 @@ def inference(image, keep_prob):
     :param keep_prob:
     :return:
     """
-    print("setting up vgg initialized conv layers ...")
+    """print("setting up vgg initialized conv layers ...")
     model_data = utils.get_model_data(FLAGS.model_dir, MODEL_URL)
 
     mean = model_data['normalization'][0][0][0]
@@ -77,15 +127,16 @@ def inference(image, keep_prob):
 
     weights = np.squeeze(model_data['layers'])
 
-    processed_image = utils.process_image(image, mean_pixel)
+    processed_image = utils.process_image(image, mean_pixel)"""
 
     with tf.variable_scope("inference"):
-        image_net = vgg_net(weights, processed_image)
-        conv_final_layer = image_net["conv5_3"]
-
+        #image_net = vgg_net(weights, processed_image)
+        conv_final_layer = inception_v3(image, scope="InceptionV3")
+        #conv_final_layer,end_points = inception_v3_base(image, final_endpoint='Mixed_7c')
+     
         pool5 = utils.max_pool_2x2(conv_final_layer)
 
-        W6 = utils.weight_variable([7, 7, 512, 4096], name="W6")
+        W6 = utils.weight_variable([7, 7, 2048, 4096], name="W6")
         b6 = utils.bias_variable([4096], name="b6")
         conv6 = utils.conv2d_basic(pool5, W6, b6)
         relu6 = tf.nn.relu(conv6, name="relu6")
@@ -107,27 +158,34 @@ def inference(image, keep_prob):
         # annotation_pred1 = tf.argmax(conv8, dimension=3, name="prediction1")
 
         # now to upscale to actual image size
-        deconv_shape1 = image_net["pool4"].get_shape()
+        pool_3, temends = inception_v3_base(image, final_endpoint='MaxPool_5a_3x3')
+        deconv_shape1 = pool_3.get_shape()
+        print(pool5.get_shape())
+      
         W_t1 = utils.weight_variable([4, 4, deconv_shape1[3].value, NUM_OF_CLASSESS], name="W_t1")
         b_t1 = utils.bias_variable([deconv_shape1[3].value], name="b_t1")
-        conv_t1 = utils.conv2d_transpose_strided(conv8, W_t1, b_t1, output_shape=tf.shape(image_net["pool4"]))
-        fuse_1 = tf.add(conv_t1, image_net["pool4"], name="fuse_1")
-
-        deconv_shape2 = image_net["pool3"].get_shape()
+        conv_t1 = utils.conv2d_transpose_strided(conv8, W_t1, b_t1, output_shape=tf.shape(pool_3))
+        fuse_1 = tf.add(conv_t1, pool_3, name="fuse_1")
+        
+        
+        pool_2, temends2 = inception_v3_base(image, final_endpoint='MaxPool_3a_3x3')
+        deconv_shape2 = pool_2.get_shape()
+        print(deconv_shape2)
+       
         W_t2 = utils.weight_variable([4, 4, deconv_shape2[3].value, deconv_shape1[3].value], name="W_t2")
         b_t2 = utils.bias_variable([deconv_shape2[3].value], name="b_t2")
-        conv_t2 = utils.conv2d_transpose_strided(fuse_1, W_t2, b_t2, output_shape=tf.shape(image_net["pool3"]))
-        fuse_2 = tf.add(conv_t2, image_net["pool3"], name="fuse_2")
+        conv_t2 = utils.conv2d_transpose_strided(fuse_1, W_t2, b_t2, output_shape=tf.shape(pool_2))
+        fuse_2 = tf.add(conv_t2, pool_2, name="fuse_2")
 
         shape = tf.shape(image)
-        deconv_shape3 = tf.pack([shape[0], shape[1], shape[2], NUM_OF_CLASSESS])
+        deconv_shape3 = tf.stack([shape[0], 224, 224, NUM_OF_CLASSESS])
         W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
         b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
         conv_t3 = utils.conv2d_transpose_strided(fuse_2, W_t3, b_t3, output_shape=deconv_shape3, stride=8)
+        print(conv_t3.get_shape())
+        annotation_pred = tf.argmax( conv_t3, dimension=3, name="prediction")
 
-        annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
-
-    return tf.expand_dims(annotation_pred, dim=3), conv_t3
+    return tf.expand_dims(annotation_pred, dim=3),  conv_t3
 
 
 def train(loss_val, var_list):
@@ -146,11 +204,13 @@ def main(argv=None):
     annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")
 
     pred_annotation, logits = inference(image, keep_probability)
+    
+    
     tf.summary.image("input_image", image, max_outputs=2)
     tf.summary.image("ground_truth", tf.cast(annotation, tf.uint8), max_outputs=2)
     tf.summary.image("pred_annotation", tf.cast(pred_annotation, tf.uint8), max_outputs=2)
-    loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits,
-                                                                          tf.squeeze(annotation, squeeze_dims=[3]),
+    loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
+                                                                          labels=tf.squeeze(annotation, squeeze_dims=[3]),
                                                                           name="entropy")))
     tf.summary.scalar("entropy", loss)
 
@@ -216,7 +276,7 @@ def main(argv=None):
             utils.save_image(valid_images[itr].astype(np.uint8), FLAGS.logs_dir, name="inp_" + str(5+itr))
             utils.save_image(valid_annotations[itr].astype(np.uint8), FLAGS.logs_dir, name="gt_" + str(5+itr))
             utils.save_image(pred[itr].astype(np.uint8), FLAGS.logs_dir, name="pred_" + str(5+itr))
-            print("Saved image: %d" % itr)
+            print("Saved image: %d" % itr) 
 
 
 if __name__ == "__main__":
