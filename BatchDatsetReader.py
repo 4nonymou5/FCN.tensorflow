@@ -35,7 +35,7 @@ class BatchDatset:
         self.images = np.array([self._transform(filename['image']) for filename in self.files])
         self.__channels = False
         self.annotations = np.array(
-            [np.expand_dims(self._transform(filename['annotation']), axis=3) for filename in self.files])
+            [np.expand_dims(self._transform1(filename['annotation']), axis=3) for filename in self.files])
         print (self.images.shape)
         print (self.annotations.shape)
 
@@ -50,6 +50,21 @@ class BatchDatset:
                                          [resize_size, resize_size], interp='nearest')
         else:
             resize_image = image
+
+        return np.array(resize_image)
+        
+    def _transform1(self, filename):
+        image = misc.imread(filename)
+        if self.__channels and len(image.shape) < 3:  # make sure images are of shape(h,w,3)
+            image = np.array([image for i in range(3)])
+
+        if self.image_options.get("resize", False) and self.image_options["resize"]:
+            resize_size = int(self.image_options["resize_size"])
+            resize_image = misc.imresize(image,
+                                         [224, 224], interp='nearest')
+        else:
+            resize_image = image
+        
 
         return np.array(resize_image)
 
