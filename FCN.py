@@ -134,8 +134,8 @@ def inference(image, keep_prob):
         conv_final_layer = inception_v3(image, scope="InceptionV3")
         #conv_final_layer,end_points = inception_v3_base(image, final_endpoint='Mixed_7c')
      
-        pool5 = utils.max_pool_2x2(conv_final_layer)
-
+        pool5 = conv_final_layer
+        """
         W6 = utils.weight_variable([7, 7, 2048, 4096], name="W6")
         b6 = utils.bias_variable([4096], name="b6")
         conv6 = utils.conv2d_basic(pool5, W6, b6)
@@ -143,45 +143,45 @@ def inference(image, keep_prob):
         if FLAGS.debug:
             utils.add_activation_summary(relu6)
         relu_dropout6 = tf.nn.dropout(relu6, keep_prob=keep_prob)
-
-        W7 = utils.weight_variable([1, 1, 4096, 4096], name="W7")
+        """
+        W7 = utils.weight_variable([1, 1, 2048, 4096], name="W7")
         b7 = utils.bias_variable([4096], name="b7")
-        conv7 = utils.conv2d_basic(relu_dropout6, W7, b7)
+        conv7 = utils.conv2d_basic(pool5, W7, b7)
         relu7 = tf.nn.relu(conv7, name="relu7")
         if FLAGS.debug:
             utils.add_activation_summary(relu7)
         relu_dropout7 = tf.nn.dropout(relu7, keep_prob=keep_prob)
-
+        
         W8 = utils.weight_variable([1, 1, 4096, NUM_OF_CLASSESS], name="W8")
         b8 = utils.bias_variable([NUM_OF_CLASSESS], name="b8")
         conv8 = utils.conv2d_basic(relu_dropout7, W8, b8)
         # annotation_pred1 = tf.argmax(conv8, dimension=3, name="prediction1")
-
+        
         # now to upscale to actual image size
-        pool_3, temends = inception_v3_base(image, final_endpoint='MaxPool_5a_3x3')
+        pool_3, temends = inception_v3_base(image, final_endpoint='Mixed_6d')
         deconv_shape1 = pool_3.get_shape()
-        print(pool5.get_shape())
+        print(deconv_shape1)
       
-        W_t1 = utils.weight_variable([4, 4, deconv_shape1[3].value, NUM_OF_CLASSESS], name="W_t1")
+        W_t1 = utils.weight_variable([3, 3, deconv_shape1[3].value, NUM_OF_CLASSESS], name="W_t1")
         b_t1 = utils.bias_variable([deconv_shape1[3].value], name="b_t1")
         conv_t1 = utils.conv2d_transpose_strided(conv8, W_t1, b_t1, output_shape=tf.shape(pool_3))
         fuse_1 = tf.add(conv_t1, pool_3, name="fuse_1")
         
         
-        pool_2, temends2 = inception_v3_base(image, final_endpoint='MaxPool_3a_3x3')
+        pool_2, temends2 = inception_v3_base(image, final_endpoint='Mixed_5c')
         deconv_shape2 = pool_2.get_shape()
         print(deconv_shape2)
        
-        W_t2 = utils.weight_variable([4, 4, deconv_shape2[3].value, deconv_shape1[3].value], name="W_t2")
+        W_t2 = utils.weight_variable([3, 3, deconv_shape2[3].value, deconv_shape1[3].value], name="W_t2")
         b_t2 = utils.bias_variable([deconv_shape2[3].value], name="b_t2")
         conv_t2 = utils.conv2d_transpose_strided(fuse_1, W_t2, b_t2, output_shape=tf.shape(pool_2))
         fuse_2 = tf.add(conv_t2, pool_2, name="fuse_2")
 
         shape = tf.shape(image)
         deconv_shape3 = tf.stack([shape[0], 224, 224, NUM_OF_CLASSESS])
-        W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
+        W_t3 = utils.weight_variable([15, 15, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
         b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
-        conv_t3 = utils.conv2d_transpose_strided(fuse_2, W_t3, b_t3, output_shape=deconv_shape3, stride=8)
+        conv_t3 = utils.conv2d_transpose_strided(fuse_2, W_t3, b_t3, output_shape=deconv_shape3, stride=6)
         print(conv_t3.get_shape())
         annotation_pred = tf.argmax( conv_t3, dimension=3, name="prediction")
 
@@ -209,8 +209,8 @@ def main(argv=None):
     tf.summary.image("input_image", image, max_outputs=2)
     tf.summary.image("ground_truth", tf.cast(annotation, tf.uint8), max_outputs=2)
     tf.summary.image("pred_annotation", tf.cast(pred_annotation, tf.uint8), max_outputs=2)
-    loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
-                                                                          labels=tf.squeeze(annotation, squeeze_dims=[3]),
+    loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits,
+                                                                          tf.squeeze(annotation, squeeze_dims=[3]),
                                                                           name="entropy")))
     tf.summary.scalar("entropy", loss)
 
